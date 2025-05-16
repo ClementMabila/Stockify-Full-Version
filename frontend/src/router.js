@@ -23,6 +23,11 @@ import TrendChart from './components/TrendChart.vue';
 import RecommendedSuppliers from './components/RecommendedSuppliers.vue';
 import MessagingPage from './components/MessagingPage.vue';
 import Prole from './components/Prole.vue';
+import Profiles from './pages/Prole.vue';
+import Profile from './pages/Profile.vue';
+import InvMessanger from './pages/InvMessanger.vue';
+import SelectedUserProfile from './pages/SelectedUserProfile.vue';
+import StockUploader  from './components/StockUploader.vue';
 
 const routes = [
   {path: '/',name: 'home',component: Home,},
@@ -53,7 +58,12 @@ const routes = [
   { path: '/TrendChart', component: TrendChart},
   { path: '/RecommendedSuppliers', component: RecommendedSuppliers},
   { path: '/MessagingPage', component: MessagingPage},
-  { path: '/Prole', component: Prole}
+  { path: '/Prole', component: Prole},
+  { path: '/Profile', component: Profile},
+  { path: '/Messanger', component: InvMessanger},
+  { path: '/user-profile/:id', name: 'UserProfileView', component: Profiles},
+  { path: '/ShowProfile/:id', name: 'UserProfile', component: SelectedUserProfile},
+  { path: '/StockUploader', name: 'StockUploader', component: StockUploader},
 ]
   
 const router = createRouter({

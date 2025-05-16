@@ -1,90 +1,33 @@
 <template>
-  <div class="p-6 bg-gray-50 rounded-xl shadow-lg">
-    <div class="flex items-center justify-between mb-6">
-      <h2 class="text-2xl font-bold text-gray-800 heading-style">Stock Investment Analytics</h2>
-      <div class="flex space-x-3">
-        <button 
-          @click="activeTimeframe = 'daily'" 
-          class="px-3 py-1.5 rounded-md transition-colors button-style" 
-          :class="activeTimeframe === 'daily' ? 'bg-blue-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
-        >
-          Daily
-        </button>
-        <button 
-          @click="activeTimeframe = 'monthly'" 
-          class="px-3 py-1.5 rounded-md transition-colors button-style-black" 
-          :class="activeTimeframe === 'monthly' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
-        >
-          Monthly
-        </button>
-      </div>
-    </div>
-
-    <div class="bg-white p-4 rounded-lg shadow-sm mb-6 card-added-style">
-      <div class="flex justify-between items-center mb-3">
-        <div>
-          <span class="text-gray-500 text-sm font-inc-style">Current Price</span>
-          <div class="text-2xl font-bold text-gray-900 curr-price-style">{{ currentPrice }}</div>
-        </div>
-        <div :class="priceChange >= 0 ? 'text-green-600' : 'text-red-600'" class="flex items-center">
-          <span class="text-2xl font-semibold black-button-style">{{ priceChange >= 0 ? '+' : '' }}{{ priceChange }}%</span>
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" :class="priceChange >= 0 ? 'rotate-0' : 'rotate-180'">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18" />
-          </svg>
-        </div>
-      </div>
-
-      <div class="flex space-x-4 flex-styled">
-        <div class="text-sm">
-          <span class="text-gray-500 font-inc-style">Open</span>
-          <div class="font-medium text-gray-800 styled-curr-stats">{{ currentOpen }}</div>
-        </div>
-        <div class="text-sm">
-          <span class="text-gray-500 font-inc-style">High</span>
-          <div class="font-medium text-gray-800 styled-curr-stats">{{ currentHigh }}</div>
-        </div>
-        <div class="text-sm">
-          <span class="text-gray-500 font-inc-style">Low</span>
-          <div class="font-medium text-gray-800 styled-curr-stats-sec">{{ currentLow }}</div>
-        </div>
-        <div class="text-sm">
-          <span class="text-gray-500 font-inc-style">Volume</span>
-          <div class="font-medium text-gray-800 styled-curr-stats-sec">{{ formattedVolume }}</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="mb-4">
-      <div class="flex items-center space-x-2 mb-4">
-        <div class="h-3 w-3 rounded-full bg-blue-600"></div>
-        <h3 class="text-lg font-semibold text-gray-800 heading-style">{{ activeTimeframe === 'daily' ? 'Daily' : 'Monthly' }} Performance</h3>
-      </div>
-      <div class="chart-container bg-white rounded-lg shadow-sm p-4">
-        <div v-if="loading" class="flex items-center justify-center h-full">
-          <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600"></div>
-        </div>
-        <div v-else-if="error" class="flex items-center justify-center h-full text-red-500">
-          {{ error }}
-        </div>
-        <canvas v-else id="stockChart"></canvas>
-      </div>
-    </div>
-
-    <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 flexed-style-bottom">
-      <div class="p-4 rounded-lg shadow-sm styled-banners">
-        <h4 class="text-sm font-medium banner-texts-bottom mb-1">Market Cap</h4>
-        <p class="text-lg font-bold text-gray-800">$4.85B</p>
-      </div>
-      <div class="styled-banners-a p-4 rounded-lg shadow-sm">
-        <h4 class="text-sm font-medium banner-texts-bottom mb-1">52W Range</h4>
-        <p class="text-lg font-bold text-gray-800">$125.30 - $298.76</p>
-      </div>
-      <div class="styled-banners-aa p-4 rounded-lg shadow-sm">
-        <h4 class="text-sm font-medium banner-texts-bottom mb-1" style="color: #444;">Avg. Volume</h4>
-        <p class="text-lg font-bold text-gray-800">1.2M</p>
-      </div>
-    </div>
-  </div>
+  <div class="flex items-center space-x-2 mb-4">
+   </div>
+   <div class="chart-container bg-white rounded-lg shadow-sm p-0" style="height: 400px; width: 800px;">
+       <div class="flex space-x-3" style="margin-top: 0px; margin-left: -435px;">
+     <button 
+       @click="activeTimeframe = 'daily'" 
+       class="px-3 py-1.5 rounded-md transition-colors button-style" style="margin-left:-185px; color: white; border: none;" 
+       :class="activeTimeframe === 'daily' ? 'bg-blue-600' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+     >
+       Daily
+     </button>
+     <button 
+       @click="activeTimeframe = 'monthly'" 
+       class="px-3 py-1.5 rounded-md transition-colors button-style-black" 
+       :class="activeTimeframe === 'monthly' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'"
+     >
+       Monthly
+     </button>
+     <h3 class="text-lg font-semibold text-gray-800 heading-style">{{ activeTimeframe === 'daily' ? 'Daily' : 'Monthly' }} Performance</h3>
+ 
+   </div>
+       <div v-if="loading" class="flex items-center justify-center h-full">
+       <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600"></div>
+     </div>
+     <div v-else-if="error" class="flex items-center justify-center h-full text-red-500">
+       {{ error }}
+     </div>
+     <canvas v-else id="stockChart"></canvas>
+ </div>
 </template>
 
 <script>
@@ -569,4 +512,39 @@ button {
   align-items: center;
   text-align: center;
 }
+
+#stockChart {
+    width: 900px;
+    height: 200px;
+  }
+
+  .button-style {
+    background-color: #328bc6;
+    color: #444;
+    border: 1px solid #444;
+    font-size: 11px;
+    border-radius: 10px;
+    margin-right: 8px;
+    margin-top: 10px;
+    margin-left: -250px;
+  }
+  
+  .button-style-black {
+    border-radius: 10px;
+    font-size: 11px;
+    margin-right: 6px;
+    background-color: #7effdb;
+    color: white;
+  }
+  
+  .heading-style {
+    padding: 10px;
+    margin-right: 180px;
+    color: #4444;
+    font-size: 11px;
+    margin-top: -2px;
+    margin-bottom: -25px;
+    margin-bottom: -30px;
+    margin-left: -40px;
+  }
 </style>

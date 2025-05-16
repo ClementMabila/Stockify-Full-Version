@@ -11,10 +11,10 @@
             <router-link to="/InvestmentsDisplay" class="nav-link"><span><img src="../assets/images/stocks-icons2.png" alt="Google Icon" class="icon-side" /></span>Org Stats</router-link>
         </li>
         <li class="nav-item">
-            <router-link to="/stock-history" class="nav-link-free">Messanger</router-link>
+            <router-link to="/Messanger" class="nav-link"><span><img src="../assets/images/messanger.png" alt="Google Icon" class="icon-side" /></span>Messanger</router-link>
         </li>
         <li class="nav-item">
-            <router-link to="/inventory" class="nav-link-free">Inventory</router-link>
+            <router-link to="/Profile" class="nav-link"><span><img src="../assets/images/user-icon.png" alt="Google Icon" class="icon-side" /></span>Profile</router-link>
         </li>
         </ul>
     </div>

@@ -7,7 +7,7 @@
           <img src="../assets/images/search.png" alt="Search" class="search-icon">
           <input type="text" placeholder="Search Entry..." />
         </div>
-        <div class="header-entry-icons">
+        <div class="header-entry-icons" style="margin-right: -310px;">
           <button class="entry-icon-button" @click="toggleFilter">
             <img src="../assets/images/filter.png" alt="Search" class="entry-icons">
             <span> Filter</span>

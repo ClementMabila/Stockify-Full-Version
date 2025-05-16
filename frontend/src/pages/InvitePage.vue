@@ -18,9 +18,9 @@
           </div>
 
           <div>
-            <label for="group">Select Group</label>
+            <label for="group" class="email-label">Select Group</label>
             <select v-model="selectedGroup" id="group" required>
-              <option disabled value="">Select a group</option>
+              <option class="select-label" disabled value="">Select a group</option>
               <option v-for="group in groups" :key="group.id" :value="group.name">{{ group.name }}</option>
             </select>
           </div>
@@ -39,7 +39,7 @@
             <label for="group">Select Group</label>
             <select v-model="selectedGroup" id="group" required>
               <option disabled value="">Select a group</option>
-              <option v-for="group in groups" :key="group.id" :value="group.name">{{ group.name }}</option>
+              <option class="group-value" v-for="group in groups" :key="group.id" :value="group.name">{{ group.name }}</option>
             </select>
           </div>
 

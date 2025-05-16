@@ -1,8 +1,16 @@
 from django.urls import path
 from . import views
-from .views import get_notifications, FetchStockInvestments, MyInvestmentView, CustomerViewSet, GoogleLogin, sales_stock_data, dashboard_stats, mark_notifications_seen, StockAlertViewSet, SupplierViewSet,  send_invitation, verify_otp, register_from_invite, UploadCSVView, UploadProductCSVView, export_products_to_csv, SalesEntryViewSet, StockHistoryViewSet, InventoryViewSet, UserRegistrationAndOrganizationCreateView, InvestmentPerformanceView, InvestableStockListView, InvestInStockView
+from .views import get_notifications, organization_investors_count, CurrOrganizationMembersView, UserProfileDetailByIdView, FetchStockInvestments, MyInvestmentView, CustomerViewSet, GoogleLogin, sales_stock_data, dashboard_stats, mark_notifications_seen, StockAlertViewSet, SupplierViewSet,  send_invitation, verify_otp, register_from_invite, UploadCSVView, UploadProductCSVView, export_products_to_csv, SalesEntryViewSet, StockHistoryViewSet, InventoryViewSet, UserRegistrationAndOrganizationCreateView, InvestmentPerformanceView, InvestableStockListView, InvestInStockView, MessageViewSet
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from django.conf import settings
+from django.conf.urls.static import static
+from .views import StockBulkUploadView, StockDataAnalysisView, StockTemplateView, StockExportView
+
+message_list = MessageViewSet.as_view({
+    'get': 'list',
+    'post': 'create',
+})
 
 router = DefaultRouter()
 router.register(r'stock-alerts', StockAlertViewSet, basename='stock-alert')
@@ -54,8 +62,18 @@ urlpatterns = [
     path('api/messages/send/<int:user_id>/', views.send_message, name='send_message'),
     path('api/user/profile/', views.UserProfileView.as_view(), name='user-profile'),
     path('api/user/profile/update/', views.UserProfileUpdateView.as_view(), name='user-profile-update'),
-    
+    path('api/stock/upload/', StockBulkUploadView.as_view(), name='stock_upload'),
+    path('api/stock/analysis/', StockDataAnalysisView.as_view(), name='stock_analysis'),
+    path('api/stock/template/', StockTemplateView.as_view(), name='stock_template'),
+    path('api/stock/export/', StockExportView.as_view(), name='stock_export'),
+    path('api/stock/analysis/', StockDataAnalysisView.as_view(), name='stock-analysis'),
+
     # Organization related endpoints
     path('api/organization/members/', views.OrganizationMembersView.as_view(), name='organization-members'),
-    
-]
+    path('api/messages/', message_list, name='message-list'),
+    path('api/organization/investors-count/', organization_investors_count, name='organization_investors_count'),
+    path('api/user-rating/', views.get_user_role_and_rating, name='user_rating'),
+    path('api/user-profile/<int:user_id>/', UserProfileDetailByIdView.as_view(), name='admin_user_profile_detail'),
+    path('api/organization/members/<int:user_id>/', CurrOrganizationMembersView.as_view(), name='organization-members'),
+    path('api/user-rating/<int:user_id>/', views.get_user_role_and_rating_id, name='user_rating'),
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

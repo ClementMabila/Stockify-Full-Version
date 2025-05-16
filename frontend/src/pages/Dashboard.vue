@@ -1,6 +1,8 @@
 <template>
   <div class="main-container">
-    <div id="dashboard" class="d-flex vh-100">
+    <div id="dashboard" class="d-flex" style="min-height: 100vh; overflow-y: auto;">
+  <!-- your scrollable content -->
+
   <div class="sidebar">
     <ul class="nav flex-column">
       <li class="nav-item">
@@ -180,7 +182,7 @@
   </div>
 
   <div class="graphs-section-display">
-    <div class="graph-display">
+    <div class="graph-display" style="margin-top: 90px;">
       <section >
         <StockHistory/>
     </section>
@@ -322,5 +324,22 @@ export default {
   },
 };
 </script>
+<style scoped>
+#dashboard {
+  /* Enable scrolling */
+  overflow-y: auto;
+  scrollbar-width: none; /* Firefox */
+}
+
+/* Chrome, Edge, Safari */
+#dashboard::-webkit-scrollbar {
+  width: 0px;
+  background: transparent;
+}
+
+#dashboard::-webkit-scrollbar-thumb {
+  background-color: transparent;
+}
+</style>
 
 <style src="../assets/css/dashboard.css"></style>

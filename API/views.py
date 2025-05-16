@@ -5,8 +5,13 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework import permissions, generics
 from rest_framework.exceptions import PermissionDenied, NotFound
 from dateutil.relativedelta import relativedelta
+from django.db import transaction
+from django.db.models import Avg, Sum, Count, Max, Min
+from django.db.models import F
+from django.db.models.functions import ExtractHour
 from io import TextIOWrapper
 import pandas as pd
+from django.shortcuts import get_object_or_404
 from django.middleware.csrf import get_token
 from django.db.models import Sum, Q, Max
 from .forms import CreateUserForm
@@ -54,6 +59,14 @@ import datetime
 from django.db.models.functions import TruncMonth, TruncDay
 from django.db.models import Sum, Count
 from .models import RestockRequest, Sale, MonthlySalesStock, StockHistory, Stock, Product, Supplier, Invitation, OTPCode, Investment, Withdrawal, UserProfile, Organization, Customer, MonthlyInvestment, StockInvestment, InvestorMessage, ChatMessage
+import pandas as pd
+import numpy as np
+import io
+import json
+import csv
+import openpyxl
+from datetime import datetime
+from rest_framework.parsers import MultiPartParser, FormParser
 from .serializers import (
     StockAlertSerializer,
     SalesEntrySerializer,
@@ -131,7 +144,7 @@ def register_from_invite(request, token):
 
             invitation.delete()  
 
-        otp = str(uuid.uuid4())[:6]  
+        otp = ''.join(random.choices('0123456789', k=6))  
                 
         organization = invitation.organization 
         print(f"[DEBUG] The organization found for registartion: {organization}")
@@ -401,38 +414,36 @@ class SalesEntryViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, IsFinancialAdminOrAdmin]
 
     def get_queryset(self):
-        # Only show sales for the user's organization
         return Sale.objects.filter(
             organization=self.request.user.userprofile.organization
         ).order_by('-sale_date')
 
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
-            # Allow read-only for all authenticated users
             return [permissions.IsAuthenticated()]
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        role = get_user_role(self.request.user)
-        if role not in ['Financial Admin', 'Admin']:
-            raise PermissionDenied("You don't have permission to create sales")
+        with transaction.atomic():
+            role = get_user_role(self.request.user)
+            if role not in ['Financial Admin', 'Admin']:
+                raise PermissionDenied("You don't have permission to create sales")
 
-        organization = self.request.user.userprofile.organization
+            organization = self.request.user.userprofile.organization
 
-        # Get last sale to determine next SKU
-        last_sale = Sale.objects.filter(organization=organization).order_by('-id').first()
-        if last_sale and last_sale.sku and last_sale.sku.startswith("SK"):
-            last_number = int(last_sale.sku[2:])
-            next_sku = f"SK{last_number + 1}"
-        else:
-            next_sku = "SK1001"
+            last_sale = Sale.objects.filter(organization=organization).order_by('-id').first()
+            if last_sale and last_sale.sku and last_sale.sku.startswith("SK"):
+                last_number = int(last_sale.sku[2:])
+                next_sku = f"SK{last_number + 1}"
+            else:
+                next_sku = "SK1001"
 
-        serializer = self.get_serializer(data=self.request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save(
-            organization=organization,
-            sku=next_sku
-        )
+            serializer = self.get_serializer(data=self.request.data)
+            serializer.is_valid(raise_exception=True)
+            serializer.save(
+                organization=organization,
+                sku=next_sku
+            )
 
     def perform_update(self, serializer):
         role = get_user_role(self.request.user)
@@ -752,26 +763,6 @@ def dashboard_stats(request):
 
     serializer = DashboardStatsSerializer(data)
     return Response(serializer.data)
-
-@api_view(['GET'])
-def sales_stock_data(request):
-    records = MonthlySalesStock.objects.all()
-    data = {}
-    for record in records:
-        year = str(record.year)
-        if year not in data:
-            data[year] = []
-        data[year].append({
-            "month": record.month,
-            "Sales": record.sales,
-            "Stock": record.stock,
-        })
-        
-    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    for year in data:
-        data[year].sort(key=lambda x: month_order.index(x["month"]))
-
-    return Response(data)
 
 
 class GoogleLogin(SocialLoginView):
@@ -1185,7 +1176,7 @@ def get_message_contacts(request):
                     'username': contact_user.username,
                     'full_name': f"{contact_user.first_name} {contact_user.last_name}".strip() or contact_user.username,
                     'role': contact_profile.role,
-                    'avatar': contact_profile.avatar.url if contact_profile.avatar else None,
+                    'avatar': request.build_absolute_uri(contact_profile.avatar.url) if contact_profile.avatar else None,
                     'last_message': last_message.message[:50] + '...' if last_message and len(last_message.message) > 50 else (last_message.message if last_message else None),
                     'last_message_time': last_message.timestamp.isoformat() if last_message else None,
                     'unread_count': unread_count,
@@ -1327,10 +1318,30 @@ class UserProfileView(generics.RetrieveAPIView):
     def get(self, request, *args, **kwargs):
         user = self.request.user
         serializer = UserSerializer(user)
-        profile_serializer = UserProfileSerializer(user.userprofile)
-        
+        profile_serializer = UserProfileSerializer(user.userprofile, context={'request': request})
+
         return Response({
             'user': serializer.data,
+            'profile': profile_serializer.data
+        })
+
+class UserProfileDetailByIdView(generics.RetrieveAPIView):
+    """
+    Retrieve another user's profile information using their user ID.
+    Restricted to admins or privileged users.
+    """
+    permission_classes = [IsAuthenticated]  # Adjust if needed
+    from .serializers import UserProfileDetailSerializer
+    serializer_class = UserProfileDetailSerializer
+
+    def get(self, request, *args, **kwargs):
+        user_id = self.kwargs.get('user_id')
+        user = get_object_or_404(User, id=user_id)
+        user_serializer = UserSerializer(user)
+        profile_serializer = UserProfileSerializer(user.userprofile, context={'request': request})
+
+        return Response({
+            'user': user_serializer.data,
             'profile': profile_serializer.data
         })
 
@@ -1353,7 +1364,6 @@ class UserProfileUpdateView(generics.UpdateAPIView):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         
-        # Return updated user and profile data
         user_serializer = UserSerializer(self.request.user)
         profile_serializer = UserProfileSerializer(instance)
         
@@ -1375,8 +1385,32 @@ class OrganizationMembersView(generics.ListAPIView):
         user = self.request.user
         try:
             organization = user.userprofile.organization
+            print(f"[DEBUG] Organization members: {User.objects.filter(userprofile__organization=organization)}")
             return User.objects.filter(userprofile__organization=organization)
         except:
+            return User.objects.none()
+        
+class CurrOrganizationMembersView(generics.ListAPIView):
+    """
+    List all members of a given user's organization
+    """
+    permission_classes = [IsAuthenticated]
+    from .serializers import UserMemberSerializer
+    serializer_class = UserMemberSerializer
+
+    def get_queryset(self):
+        user_id = self.kwargs.get('user_id')
+        try:
+            user = User.objects.get(id=user_id)
+            organization = user.userprofile.organization
+            members = User.objects.filter(userprofile__organization=organization)
+            print(f"[DEBUG] Organization members for user {user_id}: {members}")
+            return members
+        except User.DoesNotExist:
+            print(f"[ERROR] User with ID {user_id} does not exist.")
+            return User.objects.none()
+        except Exception as e:
+            print(f"[ERROR] {str(e)}")
             return User.objects.none()
 
 
@@ -1395,7 +1429,6 @@ class MessageViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         
-        # Check if user role allows messaging
         role = get_user_role(user)
         if role not in ['Admin', 'Investor']:
             return ChatMessage.objects.none()
@@ -1403,7 +1436,6 @@ class MessageViewSet(viewsets.ModelViewSet):
         return ChatMessage.objects.filter(
             organization=user.userprofile.organization
         ).filter(
-            # Get messages where user is sender or receiver
             sender=user
         ) | ChatMessage.objects.filter(
             receiver=user
@@ -1412,7 +1444,6 @@ class MessageViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         role = get_user_role(self.request.user)
         
-        # Only Admin and Investor can send messages
         if role not in ['Admin', 'Investor']:
             return Response(
                 {"detail": "You don't have permission to send messages."},
@@ -1421,27 +1452,930 @@ class MessageViewSet(viewsets.ModelViewSet):
             
         serializer.save(sender=self.request.user)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def organization_investors_count(request):
+    user = request.user
+    try:
+        organization = user.userprofile.organization
+        unique_user_ids = Investment.objects.filter(organization=organization).values_list('user_id', flat=True).distinct()
+        count = unique_user_ids.count()
+        print(f"[DEBUG] Unique investor count: {count}")
+        return Response({'investor_count': count})
+    except AttributeError:
+        return Response({'investor_count': 0, 'detail': 'User has no associated organization'}, status=400)
 
-class StockHistoryViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    API endpoint for stock history
-    """
-    serializer_class = StockHistorySerializer
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_role_and_rating(request):
+    user = request.user
+    try:
+        profile = user.userprofile
+        role = profile.role
+        organization = profile.organization
+
+        # Default rating
+        rating = 0.0
+
+        if role == 'Admin':
+            total_investors = UserProfile.objects.filter(
+                organization=organization, role='Investor'
+            ).count()
+
+            total_investments = Investment.objects.filter(
+                organization=organization
+            ).count()
+
+            monthly_count = MonthlyInvestment.objects.filter(
+                organization=organization
+            ).count()
+
+            # Example rating logic for Admins
+            rating = min(10.0, (total_investors * 0.5) + (total_investments * 0.2) + (monthly_count * 0.3))
+
+        elif role == 'Investor':
+            total_value = Investment.objects.filter(user=user).aggregate(total=Sum('amount'))['total'] or 0
+            rating = min(10.0, float(total_value) / 10000)  # Cap at 10
+
+        elif role == 'FinancialAdmin':
+            monthly_activity = MonthlyInvestment.objects.filter(
+                organization=organization
+            ).aggregate(total=Sum('value'))['total'] or Decimal('0')
+            rating = min(10.0, float(monthly_activity) / 50000)  # Example scale
+
+        elif role == 'StockChecker':
+            stock_count = StockInvestment.objects.filter(
+                investment__user=user
+            ).count()
+            rating = min(10.0, stock_count * 0.2)
+        
+        print(f"[DEBUG] User role: {role}, Rating: {rating}")
+        return Response({
+            'username': user.username,
+            'role': role,
+            'rating': round(rating, 2)
+        })
+
+    except UserProfile.DoesNotExist:
+        return Response({'error': 'User profile not found.'}, status=404)
+    
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_role_and_rating_id(request, user_id):
+    try:
+        user = User.objects.get(id=user_id)
+        profile = user.userprofile
+        role = profile.role
+        organization = profile.organization
+
+        # Default rating
+        rating = 0.0
+
+        if role == 'Admin':
+            total_investors = UserProfile.objects.filter(
+                organization=organization, role='Investor'
+            ).count()
+
+            total_investments = Investment.objects.filter(
+                organization=organization
+            ).count()
+
+            monthly_count = MonthlyInvestment.objects.filter(
+                organization=organization
+            ).count()
+
+            rating = min(10.0, (total_investors * 0.5) + (total_investments * 0.2) + (monthly_count * 0.3))
+
+        elif role == 'Investor':
+            total_value = Investment.objects.filter(user=user).aggregate(total=Sum('amount'))['total'] or 0
+            rating = min(10.0, float(total_value) / 10000)
+
+        elif role == 'FinancialAdmin':
+            monthly_activity = MonthlyInvestment.objects.filter(
+                organization=organization
+            ).aggregate(total=Sum('value'))['total'] or Decimal('0')
+            rating = min(10.0, float(monthly_activity) / 50000)
+
+        elif role == 'StockChecker':
+            stock_count = StockInvestment.objects.filter(
+                investment__user=user
+            ).count()
+            rating = min(10.0, stock_count * 0.2)
+
+        print(f"[DEBUG] User role: {role}, Rating: {rating}")
+        return Response({
+            'username': user.username,
+            'role': role,
+            'rating': round(rating, 2)
+        })
+
+    except User.DoesNotExist:
+        return Response({'error': 'User not found.'}, status=404)
+    except UserProfile.DoesNotExist:
+        return Response({'error': 'User profile not found.'}, status=404)
+
+
+class StockBulkUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def generate_unique_sku(self, organization, prefix='SKU'):
+        """Generates a unique SKU like SKU001, SKU002, ..."""
+        i = 1
+        while True:
+            new_sku = f"{prefix}{str(i).zfill(3)}"
+            if not Product.objects.filter(organization=organization, sku=new_sku).exists():
+                return new_sku
+            i += 1
+    
+    def post(self, request, *args, **kwargs):
+        file_obj = request.FILES.get('file')
+        if not file_obj:
+            return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = request.user
+            organization = request.user.userprofile.organization
+            if not organization:
+                return Response({'error': 'User has no associated organization'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Process different file formats
+            file_extension = file_obj.name.split('.')[-1].lower()
+            
+            if file_extension == 'csv':
+                df = pd.read_csv(file_obj)
+            elif file_extension in ['xls', 'xlsx']:
+                df = pd.read_excel(file_obj)
+            elif file_extension == 'json':
+                df = pd.read_json(file_obj)
+            elif file_extension == 'txt':
+                # Assuming tab-delimited
+                df = pd.read_csv(file_obj, delimiter='\t')
+            else:
+                return Response(
+                    {'error': f'Unsupported file format: {file_extension}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Apply column mapping from frontend
+            column_mappings = request.data.get('column_mappings')
+            if column_mappings:
+                column_mappings = json.loads(column_mappings)
+                df.rename(columns=column_mappings, inplace=True)
+
+            # Preprocessing
+            df = preprocess_dataframe(df)
+            
+            # Validate the data structure
+            required_columns = ['name', 'sku', 'quantity', 'unit_price', 'category']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                return Response(
+                    {'error': f'Missing required columns: {", ".join(missing_columns)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Process the dataframe
+            results = self.process_stock_data(df, organization, user)
+
+            print(f"[DEBUG] Processed results: {results}")
+            
+            return Response(results, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    def process_stock_data(self, df, organization, user):
+        """Process the dataframe and update the database"""
+        results = {
+            'success': 0,
+            'errors': [],
+            'created': [],
+            'updated': []
+        }
+        
+        # Convert df to list of dicts for processing
+        records = df.to_dict('records')
+        
+        for record in records:
+            try:
+                # Extract data
+                sku = record.get('sku', '').strip()
+                if not sku:
+                    sku = self.generate_unique_sku(organization)
+
+                # Check if SKU is missing or already used
+                if not sku or Product.objects.filter(organization=organization, sku=sku).exists():
+                    sku = self.generate_unique_sku(organization)
+
+                name = record.get('name')
+                category = record.get('category')
+                quantity = int(record.get('quantity', 0))
+                unit_price = float(record.get('unit_price', 0))
+                
+                # Optional fields
+                available_size = record.get('available_size')
+                location = record.get('location')
+                reorder_level = record.get('reorder_level', 10)
+                
+                # Get or create supplier
+                supplier_name = record.get('supplier')
+                supplier = None
+
+                # Define default values for missing fields
+                default_email = "default@example.com"
+                default_contact = "Unknown"
+                default_is_open_for_investment = False
+
+                if supplier_name:
+                    try:
+                        # First try to get an existing supplier with this name
+                        supplier = Supplier.objects.get(
+                            name=supplier_name,
+                            organization=organization
+                        )
+                    except Supplier.DoesNotExist:
+                        # Only create if it doesn't exist
+                        supplier = Supplier.objects.create(
+                            name=supplier_name,
+                            organization=organization,
+                            email=f"{supplier_name.lower().replace(' ', '_')}@example.com",
+                            contact=default_contact,
+                            is_open_for_investment=default_is_open_for_investment,
+                            user=user
+                        )
+
+                
+                # Try to get existing product or create new one
+                product, created = Product.objects.update_or_create(
+                    organization=organization,
+                    sku=sku,
+                    defaults={
+                        'name': name,
+                        'category': category,
+                        'unit_price': unit_price,
+                        'available_size': available_size,
+                        'location': location,
+                        'reorder_level': int(reorder_level),
+                        'supplier': supplier,
+                        'user': user # Assuming Organization has an owner field
+                    }
+                )
+                
+                # Update or create stock record
+                stock, stock_created = Stock.objects.update_or_create(
+                    organization=organization,
+                    product=product,
+                    defaults={'quantity': quantity}
+                )
+                
+                if created:
+                    results['created'].append(sku)
+                else:
+                    results['updated'].append(sku)
+                    
+                results['success'] += 1
+                
+            except Exception as e:
+                results['errors'].append(f"Error processing SKU {record.get('sku', 'unknown')}: {str(e)}")
+                
+        return results
+
+
+class StockDataAnalysisView(APIView):
+    """API endpoint for analyzing stock data"""
     permission_classes = [IsAuthenticated]
     
-    def get_queryset(self):
-        role = get_user_role(self.request.user)
-        if role not in ['Admin', 'Financial Admin', 'Inventory Manager', 'Investor']:
-            return StockHistory.objects.none()
+    def get(self, request, *args, **kwargs):
+        organization = request.user.userprofile.organization
+        
+        # Get all stocks for the organization
+        stocks = Stock.objects.filter(organization=organization).select_related('product')
+        
+        # Create a dataframe from the stocks
+        data = []
+        for stock in stocks:
+            data.append({
+                'id': stock.product.id,
+                'name': stock.product.name,
+                'sku': stock.product.sku,
+                'category': stock.product.category,
+                'quantity': stock.quantity,
+                'unit_price': float(stock.product.unit_price),
+                'supplier': stock.product.supplier.name,
+                'reorder_level': stock.product.reorder_level,
+                'needs_reorder': stock.quantity <= stock.product.reorder_level
+            })
+        
+        if not data:
+            return Response({"message": "No stock data available"}, status=status.HTTP_200_OK)
+            
+        df = pd.DataFrame(data)
+        
+        # Generate analytics
+        analytics = {
+            'total_items': len(df),
+            'total_value': float((df['quantity'] * df['unit_price']).sum()),
+            'low_stock_items': int(df['needs_reorder'].sum()),
+            'categories': df['category'].value_counts().to_dict(),
+            'suppliers': df['supplier'].value_counts().to_dict(),
+            'top_value_items': df.nlargest(5, 'unit_price')[['name', 'unit_price']].to_dict('records')
+        }
+        
+        return Response(analytics, status=status.HTTP_200_OK)
 
-        return StockHistory.objects.filter(
-            organization=self.request.user.userprofile.organization
-        ).order_by('-transaction_date')
+
+class StockTemplateView(APIView):
+    """Generates a template file for stock uploads"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, *args, **kwargs):
+        format_type = request.query_params.get('format', 'csv')
+        
+        # Create a template dataframe
+        template_data = {
+            'name': ['Example Product 1', 'Example Product 2'],
+            'sku': ['SKU001', 'SKU002'],
+            'category': ['Category A', 'Category B'],
+            'quantity': [10, 20],
+            'unit_price': [9.99, 19.99],
+            'supplier': ['Supplier A', 'Supplier B'],
+            'available_size': ['M', 'L'],
+            'location': ['Warehouse A', 'Warehouse B'],
+            'reorder_level': [5, 10]
+        }
+        
+        df = pd.DataFrame(template_data)
+        
+        # Create the response based on the requested format
+        if format_type == 'csv':
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = 'attachment; filename="stock_template.csv"'
+            df.to_csv(response, index=False)
+            
+        elif format_type == 'xlsx':
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Stock Template')
+            
+            output.seek(0)
+            response = HttpResponse(
+                output.read(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = 'attachment; filename="stock_template.xlsx"'
+            
+        elif format_type == 'json':
+            response = HttpResponse(df.to_json(orient='records'), content_type='application/json')
+            response['Content-Disposition'] = 'attachment; filename="stock_template.json"'
+            
+        else:
+            return Response({'error': 'Unsupported format'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        return response
 
 
-def get_user_role(user):
-    """Helper function to get user role"""
-    try:
-        return user.userprofile.role
-    except Exception:
-        return None
+class StockExportView(APIView):
+    """Export current stock data"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, *args, **kwargs):
+        organization = request.user.userprofile.organization
+        format_type = request.query_params.get('format', 'csv')
+        
+        # Get all stocks
+        stocks = Stock.objects.filter(organization=organization).select_related('product', 'product__supplier')
+        
+        # Create a dataframe
+        data = []
+        for stock in stocks:
+            data.append({
+                'name': stock.product.name,
+                'sku': stock.product.sku,
+                'category': stock.product.category,
+                'quantity': stock.quantity,
+                'unit_price': float(stock.product.unit_price),
+                'supplier': stock.product.supplier.name,
+                'available_size': stock.product.available_size,
+                'location': stock.product.location,
+                'reorder_level': stock.product.reorder_level
+            })
+            
+        df = pd.DataFrame(data)
+        
+        # Timestamp for filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Create the response based on the requested format
+        if format_type == 'csv':
+            response = HttpResponse(content_type='text/csv')
+            response['Content-Disposition'] = f'attachment; filename="stock_export_{timestamp}.csv"'
+            df.to_csv(response, index=False)
+            
+        elif format_type == 'xlsx':
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Stock Data')
+            
+            output.seek(0)
+            response = HttpResponse(
+                output.read(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="stock_export_{timestamp}.xlsx"'
+            
+        elif format_type == 'json':
+            response = HttpResponse(df.to_json(orient='records'), content_type='application/json')
+            response['Content-Disposition'] = f'attachment; filename="stock_export_{timestamp}.json"'
+            
+        else:
+            return Response({'error': 'Unsupported format'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        return response
+
+
+# Helper functions
+def preprocess_dataframe(df):
+    """Clean and preprocess the dataframe for consistent processing"""
+    # Normalize column names (lowercase, strip spaces, replace spaces with underscores)
+    df.columns = [str(col).lower().strip().replace(' ', '_') for col in df.columns]
+    
+    # Handle common variations in column names
+    column_mapping = {
+        'product_name': 'name',
+        'item_name': 'name',
+        'product': 'name',
+        'product_sku': 'sku',
+        'item_sku': 'sku',
+        'code': 'sku',
+        'product_code': 'sku',
+        'qty': 'quantity',
+        'amount': 'quantity',
+        'stock': 'quantity',
+        'price': 'unit_price',
+        'cost': 'unit_price',
+        'size': 'available_size',
+        'product_size': 'available_size',
+        'warehouse': 'location',
+        'storage': 'location',
+        'min_quantity': 'reorder_level',
+        'reorder_point': 'reorder_level',
+    }
+    
+    # Rename columns based on the mapping
+    df = df.rename(columns={k: v for k, v in column_mapping.items() if k in df.columns})
+    
+    # Fill NaN values with appropriate defaults
+    if 'quantity' in df.columns:
+        df['quantity'] = df['quantity'].fillna(0).astype(int)
+    
+    if 'unit_price' in df.columns:
+        df['unit_price'] = df['unit_price'].fillna(0).astype(float)
+    
+    if 'reorder_level' in df.columns:
+        df['reorder_level'] = df['reorder_level'].fillna(10).astype(int)
+    
+    # Remove any rows with missing essential data
+    if 'sku' in df.columns:
+        df = df.dropna(subset=['sku'])
+    
+    return df
+
+#STOCK FOCUSED STATS
+
+@api_view(['GET'])
+def sales_stock_data(request):
+    """
+    Enhanced API endpoint for sales and stock data with real-time analytics
+    """
+    # Get organization from request
+    organization_id = request.query_params.get('organization_id')
+    if not organization_id:
+        # Try to get from user's profile if authenticated
+        if request.user and request.user.is_authenticated:
+            organization_id = request.user.userprofile.organization
+    
+    # Initialize response data
+    data = {
+        "years_data": {},
+        "analytics": {},
+        "real_time": {}
+    }
+ 
+    # Base queryset with organization filter
+    base_queryset = MonthlySalesStock.objects.all()
+    if organization_id:
+        base_queryset = base_queryset.filter(organization_id=organization_id)
+    
+    # Get records and organize by year
+    records = base_queryset.order_by('year', 'month')
+    
+    # Process raw records for historical data
+    for record in records:
+        year = str(record.year)
+        if year not in data["years_data"]:
+            data["years_data"][year] = []
+            
+        data["years_data"][year].append({
+            "month": record.month,
+            "Sales": float(record.sales),  # Convert Decimal to float for JSON serialization
+            "Stock": record.stock,
+            "ratio": round(record.sales / record.stock, 2) if record.stock > 0 else 0,
+            "sales_count": record.sales_count
+        })
+    
+    # Sort months in chronological order
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    for year in data["years_data"]:
+        data["years_data"][year].sort(key=lambda x: month_order.index(x["month"]))
+    
+    # Add analytics data
+    data["analytics"] = calculate_analytics(base_queryset, organization_id)
+    
+    # Real-time data for today
+    data["real_time"] = get_real_time_data(organization_id)
+    print(f"[DEBUG] Display stats data {data}")
+    return Response(data)
+
+
+def calculate_analytics(queryset, organization_id=None):
+    """Calculate advanced analytics from the queryset"""
+    current_date = timezone.now()
+    current_year = current_date.year
+    current_month_num = current_date.month
+    
+    # Convert month number to string representation
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    current_month = month_order[current_month_num - 1]
+    
+    # Previous year same period
+    last_year = current_year - 1
+    
+    # Current year data
+    current_year_data = queryset.filter(year=current_year)
+    last_year_data = queryset.filter(year=last_year)
+    
+    # Current year up to current month
+    current_ytd = current_year_data.filter(
+        Q(month__in=[month_order[i] for i in range(current_month_num)])
+    )
+    
+    # Last year same period
+    last_ytd = last_year_data.filter(
+        Q(month__in=[month_order[i] for i in range(current_month_num)])
+    )
+    
+    # Calculate YTD metrics
+    current_ytd_sales = current_ytd.aggregate(total=Sum('sales'))['total'] or 0
+    current_ytd_stock = current_ytd.aggregate(avg=Avg('stock'))['avg'] or 0
+    
+    last_ytd_sales = last_ytd.aggregate(total=Sum('sales'))['total'] or 0
+    last_ytd_stock = last_ytd.aggregate(avg=Avg('stock'))['avg'] or 0
+    
+    # Calculate trends
+    if isinstance(current_ytd_sales, Decimal):
+        current_ytd_sales = float(current_ytd_sales)
+    if isinstance(last_ytd_sales, Decimal):
+        last_ytd_sales = float(last_ytd_sales)
+        
+    sales_growth = (((current_ytd_sales - last_ytd_sales) / last_ytd_sales) * 100) if last_ytd_sales > 0 else 0
+    stock_growth = (((current_ytd_stock - last_ytd_stock) / last_ytd_stock) * 100) if last_ytd_stock > 0 else 0
+    
+    # Calculate turnover ratio (sales/average stock)
+    current_turnover = current_ytd_sales / current_ytd_stock if current_ytd_stock > 0 else 0
+    last_turnover = last_ytd_sales / last_ytd_stock if last_ytd_stock > 0 else 0
+    
+    turnover_growth = (((current_turnover - last_turnover) / last_turnover) * 100) if last_turnover > 0 else 0
+    
+    # Monthly growth rates
+    monthly_growth = calculate_monthly_growth(queryset)
+    
+    # Forecast for next 3 months
+    forecast = generate_forecast(queryset, 3)
+    
+    # Stock efficiency (sales to stock ratio over time)
+    stock_efficiency = calculate_stock_efficiency(queryset)
+    
+    # Top selling products
+    top_products = []
+    if organization_id:
+        top_products = get_top_selling_products(organization_id)
+    
+    return {
+        "ytd_sales": current_ytd_sales,
+        "ytd_stock_avg": current_ytd_stock,
+        "sales_growth": round(sales_growth, 1),
+        "stock_growth": round(stock_growth, 1),
+        "turnover_ratio": round(current_turnover, 2),
+        "turnover_growth": round(turnover_growth, 1),
+        "monthly_growth": monthly_growth,
+        "forecast": forecast,
+        "stock_efficiency": stock_efficiency,
+        "top_products": top_products
+    }
+
+
+def get_real_time_data(organization_id=None):
+    """Get real-time sales and stock data for today"""
+    today = timezone.now().date()
+    
+    # Base queryset
+    sales_query = Sale.objects.filter(sale_date__date=today)
+    stock_query = Stock.objects
+    
+    if organization_id:
+        sales_query = sales_query.filter(organization_id=organization_id)
+        stock_query = stock_query.filter(organization_id=organization_id)
+    
+    # Total sales today
+    today_sales_amount = sales_query.aggregate(
+        total=Sum(F('sale_price') * F('quantity_sold'))
+    )['total'] or 0
+    
+    # Convert to float if it's a Decimal
+    if isinstance(today_sales_amount, Decimal):
+        today_sales_amount = float(today_sales_amount)
+    
+    # Sales count today
+    today_sales_count = sales_query.count()
+    
+    # Current total stock
+    current_stock = stock_query.aggregate(total=Sum('quantity'))['total'] or 0
+    
+    # Recent sales (last 5)
+    recent_sales = list(sales_query.order_by('-sale_date')[:5].values(
+        'id', 'product__name', 'quantity_sold', 'sale_price', 'sale_date'
+    ))
+    
+    # Format sale_date and sale_price for JSON serialization
+    for sale in recent_sales:
+        sale['sale_date'] = sale['sale_date'].strftime('%Y-%m-%d %H:%M:%S')
+        if isinstance(sale['sale_price'], Decimal):
+            sale['sale_price'] = float(sale['sale_price'])
+    
+    # Hourly sales breakdown for today
+    hourly_sales = get_hourly_sales_breakdown(today, organization_id)
+    
+    # Low stock alerts
+    low_stock_threshold = 5  # Could be a setting
+    low_stock_items = list(stock_query.filter(quantity__lte=low_stock_threshold).values(
+        'product__name', 'quantity'
+    ))
+    
+    return {
+        "today_sales_amount": today_sales_amount,
+        "today_sales_count": today_sales_count,
+        "current_stock": current_stock,
+        "recent_sales": recent_sales,
+        "hourly_sales": hourly_sales,
+        "low_stock_items": low_stock_items,
+        "timestamp": timezone.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+
+def get_hourly_sales_breakdown(date, organization_id=None):
+    """Get hourly breakdown of sales for a specific date"""
+    hours = list(range(24))
+    sales_by_hour = {hour: 0 for hour in hours}
+    
+    # Query sales for the specified date
+    sales_query = Sale.objects.filter(sale_date__date=date)
+    if organization_id:
+        sales_query = sales_query.filter(organization_id=organization_id)
+    
+    # Group by hour and sum sales
+    hourly_data = sales_query.annotate(
+        hour=ExtractHour('sale_date')
+    ).values('hour').annotate(
+        total=Sum(F('sale_price') * F('quantity_sold'))
+    ).order_by('hour')
+    
+    # Populate data
+    for entry in hourly_data:
+        hour = entry['hour']
+        total = entry['total']
+        if isinstance(total, Decimal):
+            total = float(total)
+        sales_by_hour[hour] = total
+    
+    # Format for chart
+    result = [{"hour": hour, "sales": sales} for hour, sales in sales_by_hour.items()]
+    
+    return result
+
+
+def get_top_selling_products(organization_id, period_days=30):
+    """Get top selling products for the organization"""
+    start_date = timezone.now() - timedelta(days=period_days)
+    
+    top_products = Sale.objects.filter(
+        organization_id=organization_id,
+        sale_date__gte=start_date
+    ).values(
+        'product__id', 'product__name'
+    ).annotate(
+        total_quantity=Sum('quantity_sold'),
+        total_sales=Sum(F('sale_price') * F('quantity_sold'))
+    ).order_by('-total_sales')[:5]
+    
+    # Format for response
+    result = []
+    for product in top_products:
+        if isinstance(product['total_sales'], Decimal):
+            product['total_sales'] = float(product['total_sales'])
+        
+        result.append({
+            'product_id': product['product__id'],
+            'product_name': product['product__name'],
+            'total_quantity': product['total_quantity'],
+            'total_sales': product['total_sales']
+        })
+    
+    return result
+
+
+def calculate_monthly_growth(queryset):
+    """Calculate month-over-month growth rates for the current year"""
+    current_year = timezone.now().year
+    current_year_data = list(queryset.filter(year=current_year).order_by('month'))
+    
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    
+    monthly_growth = []
+    previous_sales = None
+    
+    for month in month_order:
+        month_data = next((data for data in current_year_data if data.month == month), None)
+        
+        if month_data:
+            sales_value = float(month_data.sales) if isinstance(month_data.sales, Decimal) else month_data.sales
+            
+            if previous_sales is not None and previous_sales > 0:
+                growth_rate = ((sales_value - previous_sales) / previous_sales) * 100
+            else:
+                growth_rate = 0
+                
+            monthly_growth.append({
+                "month": month,
+                "sales": sales_value,
+                "growth_rate": round(growth_rate, 1)
+            })
+            
+            previous_sales = sales_value
+    
+    return monthly_growth
+
+
+def generate_forecast(queryset, months_ahead=3):
+    """Generate a simple forecast for the next few months"""
+    current_date = timezone.now()
+    current_year = current_date.year
+    current_month_idx = current_date.month - 1  # 0-based index
+    
+    # Get last 12 months of data for trend analysis
+    recent_data = []
+    
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    
+    # Collect last 12 months of data
+    for i in range(12):
+        month_idx = (current_month_idx - i) % 12
+        year = current_year if month_idx <= current_month_idx else current_year - 1
+        
+        month_name = month_order[month_idx]
+        month_data = queryset.filter(year=year, month=month_name).first()
+        
+        if month_data:
+            sales_value = float(month_data.sales) if isinstance(month_data.sales, Decimal) else month_data.sales
+            
+            recent_data.insert(0, {
+                "month": month_name,
+                "sales": sales_value,
+                "stock": month_data.stock
+            })
+    
+    # Simple moving average forecast
+    if len(recent_data) > 0:
+        # Calculate average monthly change
+        sales_changes = []
+        stock_changes = []
+        
+        for i in range(1, len(recent_data)):
+            sales_changes.append(recent_data[i]["sales"] - recent_data[i-1]["sales"])
+            stock_changes.append(recent_data[i]["stock"] - recent_data[i-1]["stock"])
+        
+        avg_sales_change = sum(sales_changes) / len(sales_changes) if sales_changes else 0
+        avg_stock_change = sum(stock_changes) / len(stock_changes) if stock_changes else 0
+        
+        # Generate forecast
+        forecast = []
+        last_sales = recent_data[-1]["sales"] if recent_data else 0
+        last_stock = recent_data[-1]["stock"] if recent_data else 0
+        
+        for i in range(1, months_ahead + 1):
+            forecast_month_idx = (current_month_idx + i) % 12
+            forecast_year = current_year if forecast_month_idx > current_month_idx else current_year + 1
+            
+            forecast_sales = max(0, last_sales + (avg_sales_change * i))
+            forecast_stock = max(0, last_stock + (avg_stock_change * i))
+            
+            forecast.append({
+                "month": month_order[forecast_month_idx],
+                "year": forecast_year,
+                "projected_sales": round(forecast_sales, 2),
+                "projected_stock": round(forecast_stock)
+            })
+        
+        return forecast
+    
+    return []
+
+
+def calculate_stock_efficiency(queryset):
+    """Calculate stock efficiency (sales to stock ratio) over time"""
+    current_year = timezone.now().year
+    last_year = current_year - 1
+    
+    # Get data for current and previous year
+    current_year_data = queryset.filter(year=current_year).order_by('month')
+    last_year_data = queryset.filter(year=last_year).order_by('month')
+    
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    
+    efficiency_data = []
+    
+    # Process current year efficiency
+    for month in month_order:
+        current_month = next((data for data in current_year_data if data.month == month), None)
+        last_month = next((data for data in last_year_data if data.month == month), None)
+        
+        if current_month:
+            current_sales = float(current_month.sales) if isinstance(current_month.sales, Decimal) else current_month.sales
+            current_efficiency = current_sales / current_month.stock if current_month.stock > 0 else 0
+            
+            last_efficiency = 0
+            if last_month:
+                last_sales = float(last_month.sales) if isinstance(last_month.sales, Decimal) else last_month.sales
+                last_efficiency = last_sales / last_month.stock if last_month.stock > 0 else 0
+            
+            efficiency_change = ((current_efficiency - last_efficiency) / last_efficiency * 100) if last_efficiency > 0 else 0
+            
+            efficiency_data.append({
+                "month": month,
+                "year": current_year,
+                "efficiency": round(current_efficiency, 2),
+                "change": round(efficiency_change, 1)
+            })
+    
+    return efficiency_data
+
+
+# Add an additional endpoint to get real-time stock and sales
+@api_view(['GET'])
+def real_time_dashboard(request):
+    """API endpoint for real-time dashboard data"""
+    organization_id = request.query_params.get('organization_id')
+    if not organization_id and request.user.is_authenticated:
+        organization_id = request.user.userprofile.organization
+    
+    # Get real-time data
+    real_time_data = get_real_time_data(organization_id)
+    
+    # Get monthly summary for current month
+    current_date = timezone.now()
+    current_year = current_date.year
+    current_month_idx = current_date.month - 1
+    month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    current_month = month_order[current_month_idx]
+    
+    # Get or create the current month's record
+    if organization_id:
+        monthly_record, _ = MonthlySalesStock.objects.get_or_create(
+            organization_id=organization_id,
+            year=current_year,
+            month=current_month,
+            defaults={'sales': 0, 'stock': 0}
+        )
+    else:
+        monthly_record = None
+    
+    monthly_summary = {}
+    if monthly_record:
+        sales_value = float(monthly_record.sales) if isinstance(monthly_record.sales, Decimal) else monthly_record.sales
+        
+        monthly_summary = {
+            "month": current_month,
+            "year": current_year,
+            "sales": sales_value,
+            "stock": monthly_record.stock,
+            "turnover_ratio": monthly_record.turnover_ratio
+        }
+    
+    response_data = {
+        "real_time": real_time_data,
+        "monthly_summary": monthly_summary
+    }
+    
+    return Response(response_data)

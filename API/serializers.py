@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import  Sale, StockHistory, StockInvestment, OTPCode, Organization, UserProfile, Product, RestockRequest, Supplier, Investment, Supplier, Stock, Customer
 from django.contrib.auth.models import User, Group
 from django.db.models import Sum
+import random
 import uuid
 from datetime import datetime
 from django.core.mail import send_mail
@@ -59,7 +60,7 @@ class UserRegistrationAndOrganizationSerializer(serializers.Serializer):
             admin_group = Group.objects.create(name='Admin')
         user.groups.add(admin_group)
 
-        otp = str(uuid.uuid4())[:6]
+        otp = ''.join(random.choices('0123456789', k=6))
 
         OTPCode.objects.create(
             email=user.email,
@@ -83,6 +84,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = ['id', 'user', 'role', 'organization', 'bio', 'location', 'avatar']
+
+        def get_avatar(self, obj):
+            request = self.context.get('request')
+            if obj.avatar and hasattr(obj.avatar, 'url'):
+                return request.build_absolute_uri(obj.avatar.url)
+            return None
 
 class StockAlertSerializer(serializers.ModelSerializer):
     product = serializers.CharField(source='product.name') 

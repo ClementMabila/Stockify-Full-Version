@@ -3,9 +3,9 @@
       <!-- Sidebar with contacts -->
       <div class="contacts-sidebar">
         <div class="header">
-          <h2>Messages</h2>
+          <h2><span class="heading-span">Stockify</span> Messager</h2>
           <div class="search-box">
-            <input type="text" placeholder="Search contacts..." v-model="searchQuery" />
+            <input type="text" placeholder="Search inbox" v-model="searchQuery" />
             <i class="fas fa-search"></i>
           </div>
         </div>
@@ -19,11 +19,12 @@
             @click="selectContact(contact.id)"
           >
             <div class="avatar-container">
-              <img
-                :src="contact.avatar || '/static/default-avatar.png'"
-                :alt="contact.full_name"
-                class="avatar"
-              />
+              <div v-if="contact.avatar">
+              <img :src="contact.avatar" alt="Profile Avatar" class="avatar">
+            </div>
+            <div v-else class="avatar-placeholder">
+              <img src="../assets/images/speech-bub.png" alt="contact.full_name" class="avatar">
+            </div>
               <span class="status-indicator" :class="{ 'online': contact.is_online }"></span>
             </div>
             
@@ -51,12 +52,7 @@
         <!-- Conversation header -->
         <div class="conversation-header">
           <div class="contact-profile">
-            <img
-              :src="messaging.state.activeConversation.userDetails?.avatar || '/static/default-avatar.png'"
-              :alt="messaging.state.activeConversation.userDetails?.full_name"
-              class="avatar"
-            />
-            <div>
+            <div class="status-top">
               <h3>{{ messaging.state.activeConversation.userDetails?.full_name }}</h3>
               <p class="status">
                 {{ messaging.state.activeConversation.userDetails?.is_online ? 'Online' : 'Offline' }}
@@ -139,7 +135,7 @@
       <div class="empty-state" v-else>
         <div class="empty-state-content">
           <i class="fas fa-comments empty-icon"></i>
-          <h2>Select a conversation</h2>
+          <h2>Select a <span class="heading-span">conversation</span></h2>
           <p>Choose a contact to start messaging</p>
         </div>
       </div>
@@ -312,12 +308,15 @@
   
   <style scoped>
   .messaging-container {
+    margin-top: -7px;
     display: flex;
     height: calc(100vh - 64px); /* Adjust based on your navbar height */
-    background-color: #f0f2f5;
+    background-color: white;
     border-radius: 10px;
     overflow: hidden;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    margin-right: 40px;
+    margin-bottom: 50px;
   }
   
   /* Contacts sidebar */
@@ -334,11 +333,17 @@
     border-bottom: 1px solid #e9edef;
   }
   
+  .header h2 {
+    font-size: 24px;
+    font-weight: 600;
+    color: #111b21;
+    margin-left: -90px;
+  }
   .contacts-sidebar h2 {
-    font-size: 20px;
+    font-size: 19px;
     font-weight: 600;
     margin-bottom: 16px;
-    color: #128c7e;
+    color:  Black;
   }
   
   .search-box {
@@ -352,7 +357,7 @@
     border-radius: 24px;
     border: none;
     background-color: #f0f2f5;
-    font-size: 15px;
+    font-size: 12px;
     outline: none;
   }
   
@@ -366,9 +371,15 @@
   
   .contacts-list {
     flex: 1;
-    overflow-y: auto;
+    overflow-y: scroll; /* ensure scrolling still works */
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none;  /* IE and Edge */
   }
-  
+
+  .contacts-list::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, and Opera */
+  }
+
   .contact-item {
     display: flex;
     padding: 16px;
@@ -391,10 +402,12 @@
   }
   
   .avatar {
-    width: 48px;
-    height: 48px;
+    width: 45px;
+    height: 45px;
     border-radius: 50%;
     object-fit: cover;
+    border: 2px solid #e9edef;
+    padding: 2px;
   }
   
   .status-indicator {
@@ -425,8 +438,8 @@
   }
   
   .contact-header h3 {
-    font-size: 16px;
-    font-weight: 500;
+    font-size: 13px;
+    font-weight: bold;
     color: #111b21;
     margin: 0;
     white-space: nowrap;
@@ -440,7 +453,7 @@
   
   .last-message {
     margin: 0;
-    font-size: 14px;
+    font-size: 12px;
     color: #667781;
     white-space: nowrap;
     /* Removed misplaced CSS property */
@@ -490,9 +503,8 @@
     flex: 1;
     display: flex;
     flex-direction: column;
-    background-color: #efeae2;
-    background-image: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDIwMCAyMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCAxKSIgZmlsbD0ibm9uZSIgZmlsbC1ydWxlPSJldmVub2RkIj48cGF0aCBkPSJNOTkuNjIyIDBoLTEuMjExTDAgNi4zOTZ2MTQzLjIwOGwxMS4zODggNi4wMTdWMTIuNjE1bDg4LjI0MS02LjA5NHYxODYuNjdIOTkuNjE1di03OS4zNzVILjAwM1YxMTkuOTNoOTkuNjE5VjB6IiBmaWxsPSIjRTRFMEQ4Ii8+PHBhdGggZD0iTTE5OS42MjcgMGgtMS4yMTJsLTk4LjgwMiA2LjM5NnYxNDMuMjA4bDExLjM4OSA2LjAxN1YxMi42MTVsODguNjMtNi4wOTR2MTg2LjY3aC0uMDA4di03OS4zNzVoLTk5LjYxMnY2LjExNGg5OS42MTlWMHoiIGZpbGw9IiNFNEUwRDgiLz48L2c+PC9zdmc+');
-    background-repeat: repeat;
+    background-color: white;
+    width: 710px;
   }
   
   .conversation-header {
@@ -500,8 +512,14 @@
     justify-content: space-between;
     align-items: center;
     padding: 10px 16px;
-    background-color: #f0f2f5;
+    background-color: white;
     border-bottom: 1px solid #e9edef;
+    width: 710px;
+    border-radius: 0px 10px 0px 0px;
+  }
+
+  .conversation-header h3 {
+    font-size: 11px;
   }
   
   .contact-profile {
@@ -517,14 +535,15 @@
   
   .contact-profile h3 {
     margin: 0;
-    font-size: 16px;
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: bold;
   }
   
   .status {
     margin: 0;
-    font-size: 13px;
+    font-size: 11px;
     color: #667781;
+    margin-left: 10px;
   }
   
   .conversation-actions {
@@ -550,7 +569,9 @@
   .messages-container {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
+    padding: 10px;
+    background-color: white;
+    width: 710px;
   }
   
   .loading-messages {
@@ -583,30 +604,31 @@
   }
   
   .message-content {
-    max-width: 65%;
     padding: 8px 12px;
     border-radius: 7.5px;
     position: relative;
     box-shadow: 0 1px 0.5px rgba(0, 0, 0, 0.13);
+    width: 200px;
+    text-align: start;
   }
   
   .my-message .message-content {
-    background-color: #d9fdd3;
+    background: linear-gradient(120deg, #dcb5ff, #ffcccc);
     align-self: flex-end;
     border-top-right-radius: 0;
   }
   
   .other-message .message-content {
-    background-color: white;
+    background-color: #f9f5f0;
     align-self: flex-start;
     border-top-left-radius: 0;
   }
   
   .message-content p {
     margin: 0 0 5px;
-    font-size: 14px;
+    font-size: 12px;
     line-height: 1.4;
-    color: #111b21;
+    color: #4444;
     word-wrap: break-word;
   }
   
@@ -633,7 +655,7 @@
   .message-input-container {
     display: flex;
     align-items: center;
-    background-color: #f0f2f5;
+    background-color: white;
     padding: 10px 16px;
   }
   
@@ -652,11 +674,12 @@
     border: none;
     border-radius: 21px;
     padding: 9px 12px;
-    font-size: 15px;
+    font-size: 12px;
     max-height: 100px;
     resize: none;
     outline: none;
     font-family: inherit;
+    background-color: #70707044;
   }
   
   .send-button {
@@ -686,6 +709,8 @@
     align-items: center;
     justify-content: center;
     background-color: #f8f9fa;
+    width: 1100px;
+    margin-right: 30px;
   }
   
   .empty-state-content {
@@ -790,5 +815,15 @@
       height: 40px;
       z-index: 3;
     }
+  }
+
+  .status-top {
+    display: flex;
+  }
+
+  .heading-span {
+    background: linear-gradient(120deg, #dcb5ff, #ffcccc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
   }
 </style>
